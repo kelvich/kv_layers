@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <style>
+        .grid line {
+            stroke: rgb(198, 226, 255);
+        }
+        .layer {
+            fill:rgb(56, 84, 128);
+        }
+        div.tooltip {
+            position: absolute;
+            padding: 20px;
+            padding-bottom: 10px;
+            margin: 10px;
+            font: 12px sans-serif;
+            background: lightsteelblue;
+            border: 0px;
+            border-radius: 8px;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="scatter_area"></div>
+    <script src="https://d3js.org/d3.v7.js"></script>
+    <script>
+        plot = (chunks) => {
+            // put relations with most chunks on top
+            relsize = {}
+            chunks.forEach(chunk => {
+                if (relsize.hasOwnProperty(chunk.chunk_info.relnum)) {
+                    relsize[chunk.chunk_info.relnum] += 1
+                } else {
+                    relsize[chunk.chunk_info.relnum] = 1
+                }
+            });
+            chunks.sort((a,b) => {
+                if (b.chunk_info.relnum == a.chunk_info.relnum) {
+                    return a.chunk_info.start > b.chunk_info.start ? 1 : -1
+                }
+                return (relsize[a.chunk_info.relnum] < relsize[b.chunk_info.relnum]) ? 1 : -1
+            });
+            // flatten out layers from chunk.layers[]
+            var chunknum = 0;
+            var layers = [];
+            var max_lsn = 0;
+            var layer_id = 0;
+            for (i = 0; i < chunks.length; i++) {
+                var chunk = chunks[i]
+                for (j = 0; j < chunk.layers.length; j++) {
+                    layer = chunk.layers[j]
+                    layer.relnum = chunk.chunk_info.relnum
+                    layer.chunk_page_start = chunk.chunk_info.start
+                    layer.chunk_page_end = chunk.chunk_info.end
+                    layer.chunknum = i
+                    layer.relnum = chunk.chunk_info.relnum
+                    layer.layer_id = ++layer_id;
+                    layers.push(layer)
+                    if (layer.lsn > max_lsn) {
+                        max_lsn = layer.lsn;
+                    }
+                }
+            }
+
+            // set the dimensions and margins of the graph
+            var margin = { top: 40, right: 50, bottom: 30, left: 50 },
+                width = (window.innerWidth-10) - margin.left - margin.right,
+                height = chunks.length*8 - margin.top - margin.bottom;
+
+            // append the svg object to the body of the page
+            var svg = d3.select("#scatter_area")
+                .append("svg")
+                .attr("width", width + margin.left + margin.right)
+                .attr("height", height + margin.top + margin.bottom)
+                .append("g")
+                .attr("transform",
+                    "translate(" + margin.left + "," + margin.top + ")");
+
+            // X axis
+            var x = d3.scaleLinear()
+                .domain([0, max_lsn * 1.03 / (1024 * 1024)]) // x in MB
+                .range([0, width]);
+            // Y axis
+            var y = d3.scaleLinear()
+                .domain([0, chunks.length])
+                .range([0, height]);
+
+            // add gridlines
+            svg.append("g")
+                .attr("class", "grid")
+                .style("stroke-dasharray", "3 4")
+                .call(d3.axisLeft(y)
+                    .ticks(chunks.length)
+                    .tickSize(-width)
+                    .tickFormat("")
+                );
+            svg.append('g')
+                .call(d3.axisTop(x));
+            svg.append('g')
+                .call(d3.axisLeft(y));
+
+            var tooltip = d3.select("body").append("div")
+                .attr("class", "tooltip")
+                .style("opacity", 0);
+
+            render_tooltip = (layer) => {
+                var html = '';
+                for (const [key, value] of Object.entries(layer)) {
+                    html += `<p style="padding: 0px; margin: 0px">
+                        ${key}: ${value}
+                    <p/>`
+                }
+                return html
+            }
+
+            svg.append("g")
+                .selectAll("whatever")
+                .data(layers)
+                .enter()
+                .append("circle")
+                .attr("id", l => `l-${l.layer_id}`)
+                .attr("class", "layer-dot")
+                .attr("cx", l => x(l.lsn / (1024 * 1024)))
+                .attr("cy", l => y(l.chunknum))
+                .attr("r", 4)
+                .attr("class", "layer")
+                .on("mouseover", (event,d) => {
+                    tooltip.style("opacity", .9);
+                    tooltip.html(render_tooltip(d))
+                        .style("left", (event.pageX) + "px")
+                        .style("top", (event.pageY) + "px");
+                })
+                .on("mouseout", (d) => {
+                    tooltip.style("opacity", 0);
+                });
+        }
+
+        fetch('chunks.json')
+            .then(response => response.json())
+            .then(data => {
+                plot(data)
+            });
+    </script>
+</body>
+</html>
